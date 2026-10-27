@@ -29,6 +29,12 @@ fun summaryText(t: Trip): String {
         append("${t.name} · ${fmtDate(t.start)} – ${fmtDate(t.end)}\n")
         append("Total spent: ${inr(t.spent)} of ${inr(t.budget)}\n")
         append(if (left >= 0) "Left: ${inr(left)}\n" else "Over budget by: ${inr(-left)}\n")
+        val byPerson = t.expenses.groupBy { it.paidBy }.mapValues { e -> e.value.sumOf { it.amount } }
+            .toList().sortedByDescending { it.second }
+        if (byPerson.isNotEmpty()) {
+            append("\nPaid by each person\n")
+            byPerson.forEach { (n, a) -> append("• $n ${inr(a)}\n") }
+        }
         if (byCat.isNotEmpty()) {
             append("\nBy category\n")
             byCat.forEach { (c, a) -> append("• $c ${inr(a)}\n") }
@@ -174,6 +180,19 @@ private fun render(t: Trip, doc: PdfDocument?, total: Int): Int {
 
     // expenses table
     val dateX = MG; val catX = MG + 72f; val paidX = MG + 142f; val detX = MG + 207f; val amtR = PW - MG
+    val groups = t.expenses.groupBy { it.paidBy }.toList().sortedByDescending { g -> g.second.sumOf { it.amount } }
+    if (groups.isNotEmpty()) {
+        section("Paid by each person")
+        style(9f, true, grey); txt("NAME", MG, y); txt("PAYMENTS", MG + 200f, y)
+        style(9f, true, grey, Paint.Align.RIGHT); txt("TOTAL PAID", amtR, y)
+        y += 6; hline(y); y += 14
+        for ((name, l) in groups) {
+            need(20f)
+            style(11f); txt(fit(name, p, 180f), MG, y); txt("${l.size}", MG + 200f, y)
+            style(11f, true, Color.BLACK, Paint.Align.RIGHT); txt(inr(l.sumOf { it.amount }), amtR, y)
+            y += 6; hline(y); y += 14
+        }
+    }
     section("Expenses (${t.expenses.size})")
     style(9f, true, grey); txt("DATE", dateX, y); txt("CATEGORY", catX, y); txt("PAID BY", paidX, y); txt("DETAILS", detX, y)
     style(9f, true, grey, Paint.Align.RIGHT); txt("AMOUNT", amtR, y)

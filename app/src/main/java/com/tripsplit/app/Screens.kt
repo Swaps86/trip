@@ -189,8 +189,10 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
     var confirm by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var addPerson by remember { mutableStateOf(false) }
+    var view by remember { mutableIntStateOf(0) }
     val ctx = LocalContext.current
     val left = trip.budget - trip.spent
+    val groups = trip.expenses.groupBy { it.paidBy }.toList().sortedByDescending { g -> g.second.sumOf { it.amount } }
     val byCat = trip.expenses.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
         .toList().sortedByDescending { it.second }
     if (confirm) AlertDialog(onDismissRequest = { confirm = false },
@@ -260,7 +262,14 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 }
             }
             if (tab == 0) {
-                if (byCat.isNotEmpty()) item {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("View:", color = Muted, fontSize = 13.sp)
+                        FilterChip(selected = view == 0, onClick = { view = 0 }, label = { Text("By date") })
+                        FilterChip(selected = view == 1, onClick = { view = 1 }, label = { Text("By person") })
+                    }
+                }
+                if (view == 0 && byCat.isNotEmpty()) item {
                     WhiteCard {
                         byCat.forEach { (c, a) ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -272,7 +281,7 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 }
                 if (trip.expenses.isEmpty()) item { Text("No expenses yet. Tap “Add expense”.", color = Muted) }
                 else item { Text("Tap an expense to edit or delete it", color = Muted, fontSize = 13.sp) }
-                items(trip.expenses, key = { it.id }) { e ->
+                items(if (view == 0) trip.expenses else emptyList(), key = { it.id }) { e ->
                     WhiteCard(Modifier.clickable { vm.screen = Screen.ExpenseView(trip.id, e.id) }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -283,6 +292,31 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                             }
                             Text(inr(e.amount), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Text("  ›", color = Muted, fontSize = 20.sp)
+                        }
+                    }
+                }
+                if (view == 1) {
+                    groups.forEach { (name, list) ->
+                        val total = list.sumOf { it.amount }
+                        item(key = "g_$name") {
+                            WhiteCard {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Column {
+                                        Text(name, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                        Text("${list.size} payment${if (list.size > 1) "s" else ""}", color = Muted, fontSize = 13.sp)
+                                    }
+                                    Text(inr(total), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                                }
+                                list.sortedBy { it.date }.forEach { e ->
+                                    Row(Modifier.fillMaxWidth().clickable { vm.screen = Screen.ExpenseView(trip.id, e.id) }
+                                        .padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("${e.category} · ${fmtDate(e.date)}"); Text(inr(e.amount))
+                                    }
+                                }
+                                if (list.size > 1) Text(list.joinToString(" + ") { inr(it.amount) } + " = " + inr(total),
+                                    color = Muted, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
@@ -315,6 +349,24 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                                 }
                                 Progress(a, trip.spent)
                             }
+                        }
+                    }
+                    item { Text("PAID BY EACH PERSON", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                    item {
+                        WhiteCard {
+                            groups.forEach { (name, list) ->
+                                val tot = list.sumOf { it.amount }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Column {
+                                        Text(name, fontWeight = FontWeight.SemiBold)
+                                        Text("${list.map { it.category }.distinct().joinToString(" + ")} · ${list.size} payment${if (list.size > 1) "s" else ""}",
+                                            color = Muted, fontSize = 13.sp)
+                                    }
+                                    Text(inr(tot), fontWeight = FontWeight.Bold)
+                                }
+                                Progress(tot, trip.spent)
+                            }
+                            Text("A person's payments are added together", color = Muted, fontSize = 13.sp)
                         }
                     }
                     item { Text("EXPENSES (${trip.expenses.size})", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
