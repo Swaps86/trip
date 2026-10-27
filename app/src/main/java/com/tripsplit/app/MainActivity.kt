@@ -26,12 +26,24 @@ class MainActivity : ComponentActivity() {
 fun App(vm: TripVM = viewModel()) {
     val s = vm.screen
     BackHandler(s != Screen.Home) {
-        vm.screen = if (s is Screen.Add) Screen.Detail(s.id) else Screen.Home
+        vm.screen = when (s) {
+            is Screen.Form -> if (s.eid != null) Screen.ExpenseView(s.id, s.eid) else Screen.Detail(s.id)
+            is Screen.ExpenseView -> Screen.Detail(s.id)
+            else -> Screen.Home
+        }
     }
     when (s) {
         Screen.Home -> HomeScreen(vm)
         Screen.Create -> CreateScreen(vm)
         is Screen.Detail -> vm.trips.find { it.id == s.id }?.let { DetailScreen(it, vm) } ?: HomeScreen(vm)
-        is Screen.Add -> vm.trips.find { it.id == s.id }?.let { AddScreen(it, vm) } ?: HomeScreen(vm)
+        is Screen.ExpenseView -> {
+            val t = vm.trips.find { it.id == s.id }
+            val e = t?.expenses?.find { it.id == s.eid }
+            if (t != null && e != null) ExpenseScreen(t, e, vm) else HomeScreen(vm)
+        }
+        is Screen.Form -> {
+            val t = vm.trips.find { it.id == s.id }
+            if (t != null) ExpenseForm(t, t.expenses.find { it.id == s.eid }, vm) else HomeScreen(vm)
+        }
     }
 }

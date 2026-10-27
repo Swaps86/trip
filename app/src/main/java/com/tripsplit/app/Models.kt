@@ -9,7 +9,8 @@ val CATEGORIES = listOf("Food", "Hotel", "Fuel", "Toll", "Shopping", "Tickets")
 data class Expense(
     val id: String = UUID.randomUUID().toString(),
     val category: String, val amount: Double, val date: Long,
-    val note: String, val paidBy: String, val splitAmong: List<String>
+    val note: String, val paidBy: String, val splitAmong: List<String>,
+    val location: String = ""
 )
 
 data class Trip(
@@ -51,13 +52,14 @@ fun settlements(b: Map<String, Double>): List<Payment> {
     return out
 }
 
-private fun JSONArray.strings() = List(length()) { getString(it) }
+fun JSONArray.strings() = List(length()) { getString(it) }
 
 fun Expense.toJson(): JSONObject = JSONObject().put("id", id).put("cat", category).put("amt", amount)
-    .put("date", date).put("note", note).put("paid", paidBy).put("split", JSONArray(splitAmong))
+    .put("date", date).put("note", note).put("paid", paidBy).put("split", JSONArray(splitAmong)).put("loc", location)
 
 fun expenseFrom(o: JSONObject) = Expense(o.getString("id"), o.getString("cat"), o.getDouble("amt"),
-    o.getLong("date"), o.getString("note"), o.getString("paid"), o.getJSONArray("split").strings())
+    o.getLong("date"), o.getString("note"), o.getString("paid"), o.getJSONArray("split").strings(),
+    o.optString("loc", ""))
 
 fun Trip.toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("start", start).put("end", end)
     .put("dest", JSONArray(destinations)).put("trav", JSONArray(travelers)).put("budget", budget)
