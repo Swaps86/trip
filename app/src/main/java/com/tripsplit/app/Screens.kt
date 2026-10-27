@@ -182,8 +182,7 @@ fun CreateScreen(vm: TripVM) {
     }
 }
 
-// ---------- 3. Trip dashboard + split ----------
-@OptIn(ExperimentalLayoutApi::class)
+// ---------- 3. Trip dashboard + report ----------
 @Composable
 fun DetailScreen(trip: Trip, vm: TripVM) {
     var tab by remember { mutableIntStateOf(0) }
@@ -191,9 +190,9 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
     var menu by remember { mutableStateOf(false) }
     var addPerson by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
-    val bal = balances(trip)
-    val pays = settlements(bal)
     val left = trip.budget - trip.spent
+    val byCat = trip.expenses.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
+        .toList().sortedByDescending { it.second }
     if (confirm) AlertDialog(onDismissRequest = { confirm = false },
         title = { Text("Delete “${trip.name}”?") }, text = { Text("All its expenses will be removed.") },
         confirmButton = { TextButton(onClick = { vm.deleteTrip(trip.id) }) { Text("Delete") } },
@@ -206,8 +205,6 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(nm, { nm = it }, label = { Text("Name") }, singleLine = true)
                     if (clean in trip.travelers) Text("This name is already in the trip", color = Owe, fontSize = 13.sp)
-                    Text("Old expenses stay split among the original travelers. New expenses include this person.",
-                        color = Muted, fontSize = 13.sp)
                 }
             },
             confirmButton = {
@@ -251,23 +248,18 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 WhiteCard {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text("Travelers (${trip.travelers.size})", fontWeight = FontWeight.Bold)
+                        Text("${trip.travelers.size} travelers", fontWeight = FontWeight.Bold)
                         OutlinedButton(onClick = { addPerson = true }) { Text("+ Add person") }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        trip.travelers.forEach { n -> AssistChip(onClick = {}, label = { Text(n) }) }
                     }
                 }
             }
             item {
                 TabRow(selectedTabIndex = tab, containerColor = Bg) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Expenses") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Split") })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Report") })
                 }
             }
             if (tab == 0) {
-                val byCat = trip.expenses.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
-                    .toList().sortedByDescending { it.second }
                 if (byCat.isNotEmpty()) item {
                     WhiteCard {
                         byCat.forEach { (c, a) ->
@@ -296,41 +288,63 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 }
             } else {
                 item {
-                    val share = if (trip.travelers.isNotEmpty()) trip.spent / trip.travelers.size else 0.0
-                    Text("Total ${inr(trip.spent)} · all travelers share equally", color = Muted, fontSize = 13.sp)
-                }
-                item {
                     WhiteCard {
-                        trip.travelers.forEach { n ->
-                            val paid = trip.expenses.filter { it.paidBy == n }.sumOf { it.amount }
-                            val net = bal[n] ?: 0.0
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column {
-                                    Text(n, fontWeight = FontWeight.SemiBold)
-                                    Text("Paid ${inr(paid)}", color = Muted, fontSize = 13.sp)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Total spent", color = Muted, fontSize = 13.sp)
+                                Text(inr(trip.spent), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Budget ${inr(trip.budget)}", color = Muted, fontSize = 13.sp)
+                                val pct = if (trip.budget > 0) (trip.spent / trip.budget * 100).toInt() else 0
+                                Text("$pct% used", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Progress(trip.spent, trip.budget)
+                        Text(if (left >= 0) "Remaining: ${inr(left)}" else "Over budget by ${inr(-left)}",
+                            color = Muted, fontSize = 13.sp)
+                    }
+                }
+                if (byCat.isNotEmpty()) {
+                    item { Text("BY CATEGORY", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                    item {
+                        WhiteCard {
+                            byCat.forEach { (c, a) ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(c); Text(inr(a), fontWeight = FontWeight.Bold)
                                 }
-                                Text(if (net > 0.005) "+${inr(net)}" else inr(net), fontWeight = FontWeight.Bold,
-                                    color = if (net > 0.005) Get else if (net < -0.005) Owe else Muted)
+                                Progress(a, trip.spent)
                             }
                         }
                     }
-                }
-                item { Text("WHO PAYS WHOM", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
-                if (pays.isEmpty()) item { Text("All settled. Nobody owes anything.", color = Muted) }
-                items(pays) { pm ->
-                    WhiteCard {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${pm.from} pays ${pm.to}")
-                            Text(inr(pm.amount), fontWeight = FontWeight.Bold)
+                    item { Text("EXPENSES (${trip.expenses.size})", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                    item {
+                        WhiteCard {
+                            trip.expenses.sortedBy { it.date }.take(4).forEach { e ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Column {
+                                        Text(e.category, fontWeight = FontWeight.SemiBold)
+                                        Text(fmtDate(e.date), color = Muted, fontSize = 13.sp)
+                                    }
+                                    Text(inr(e.amount), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (trip.expenses.size > 4)
+                                Text("+ ${trip.expenses.size - 4} more in the PDF", color = Muted, fontSize = 13.sp)
                         }
                     }
                 }
-                if (pays.isNotEmpty()) item {
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
-                        val text = "${trip.name} – settle up\n" + pays.joinToString("\n") { "${it.from} pays ${it.to} ${inr(it.amount)}" }
-                        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                            .putExtra(Intent.EXTRA_TEXT, text), "Share"))
-                    }) { Text("Share summary (WhatsApp etc.)") }
+                item {
+                    Button(enabled = trip.expenses.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(52.dp),
+                        onClick = { downloadPdf(ctx, trip) }) { Text("Download PDF") }
+                }
+                item {
+                    OutlinedButton(enabled = trip.expenses.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(52.dp),
+                        onClick = { shareText(ctx, summaryText(trip)) }) { Text("Share summary on WhatsApp") }
+                }
+                item {
+                    OutlinedButton(enabled = trip.expenses.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(52.dp),
+                        onClick = { sharePdf(ctx, trip) }) { Text("Share PDF on WhatsApp") }
                 }
             }
         }
@@ -362,10 +376,6 @@ fun ExpenseScreen(trip: Trip, e: Expense, vm: TripVM) {
             WhiteCard {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Paid by", color = Muted); Text(e.paidBy, fontWeight = FontWeight.SemiBold)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Shared by", color = Muted)
-                    Text("$n travelers · ${inr(e.amount / n)} each", fontWeight = FontWeight.SemiBold)
                 }
             }
             if (e.location.isNotBlank()) WhiteCard {
@@ -450,9 +460,6 @@ fun ExpenseForm(trip: Trip, existing: Expense?, vm: TripVM) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 trip.travelers.forEach { n -> FilterChip(selected = paid == n, onClick = { paid = n }, label = { Text(n) }) }
             }
-            val shareCount = existing?.splitAmong?.size ?: trip.travelers.size
-            if (amt > 0) Text("Shared equally by $shareCount travelers · ${inr(amt / shareCount)} each",
-                color = Muted, fontSize = 13.sp)
             OutlinedTextField(location, { location = it }, label = { Text("Location") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 supportingText = { Text(if (detecting) "Detecting your location…" else "Auto-detected · you can edit it") },
