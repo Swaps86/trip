@@ -24,9 +24,11 @@ fun detectPlace(ctx: Context, onResult: (String?) -> Unit) {
         val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
             .firstOrNull { lm.isProviderEnabled(it) }
         if (provider == null) { onResult(null); return }
-        LocationManagerCompat.getCurrentLocation(lm, provider, null, ContextCompat.getMainExecutor(ctx)) { loc ->
+        val signal: android.os.CancellationSignal? = null
+        val consumer = androidx.core.util.Consumer<Location?> { loc ->
             if (loc == null) onResult(null) else Thread { onResult(nameFor(ctx, loc)) }.start()
         }
+        LocationManagerCompat.getCurrentLocation(lm, provider, signal, ContextCompat.getMainExecutor(ctx), consumer)
     } catch (e: Exception) { onResult(null) }
 }
 
