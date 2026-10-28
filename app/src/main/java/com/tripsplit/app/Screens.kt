@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
@@ -37,6 +38,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+const val APP_VERSION = "1.0.0"
 private val Bg = Color(0xFFF6F7F4)
 private val Green = Color(0xFF0F6B5C)
 private val Muted = Color(0xFF55605A)
@@ -85,15 +87,38 @@ private fun Header(title: String, sub: String? = null, onBack: () -> Unit, actio
         action()
     }
 
+@Composable
+fun Footer() = Column(Modifier.fillMaxWidth().background(Bg).padding(vertical = 8.dp),
+    horizontalAlignment = Alignment.CenterHorizontally) {
+    Text("Shri Swami Samarth", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Green)
+    Text("© 2026 Swapnil Palande · Version $APP_VERSION", fontSize = 12.sp, color = Muted)
+}
+
 // ---------- 1. Trip list ----------
 @Composable
 fun HomeScreen(vm: TripVM) {
-    Scaffold(containerColor = Bg, floatingActionButton = {
+    var about by remember { mutableStateOf(false) }
+    if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("About TripSplit") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Trip expense tracker")
+                Text("Developed by Swapnil Palande")
+                Text("Version $APP_VERSION")
+                Text("© 2026 Swapnil Palande. All rights reserved.", color = Muted, fontSize = 13.sp)
+                Text("Shri Swami Samarth", color = Green, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        confirmButton = { TextButton(onClick = { about = false }) { Text("OK") } })
+    Scaffold(containerColor = Bg, bottomBar = { Footer() }, floatingActionButton = {
         ExtendedFloatingActionButton(onClick = { vm.screen = Screen.Create },
             icon = { Icon(Icons.Default.Add, null) }, text = { Text("New trip") })
     }) { p ->
         Column(Modifier.padding(p).padding(16.dp)) {
-            Text("My trips", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("My trips", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                IconButton(onClick = { about = true }) { Icon(Icons.Default.Info, "About this app") }
+            }
             Spacer(Modifier.height(10.dp))
             if (vm.trips.isEmpty()) Text("No trips yet. Tap “New trip” to start.", color = Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
