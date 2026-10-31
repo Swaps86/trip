@@ -28,17 +28,31 @@ fun backupFileName(prefix: String = "TripSplit_Backup") =
     "${prefix}_${SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(Date())}.json"
 
 fun saveTextToDownloads(ctx: Context, name: String, text: String): Boolean = try {
+    val resolver = ctx.contentResolver
     val values = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, name)
         put(MediaStore.Downloads.MIME_TYPE, "application/json")
         put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        put(MediaStore.Downloads.IS_PENDING, 1)
     }
-    val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
     if (uri == null) false else {
-        ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
+        resolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
+        // mark the file as finished so it shows up in Files / Downloads straight away
+        resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
         true
     }
 } catch (e: Exception) { false }
+
+/** Opens the phone's Downloads list. */
+fun openDownloads(ctx: Context) {
+    try {
+        ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(ctx, "Open the Files app and look in Downloads", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
 
 fun shareBackupFile(ctx: Context, name: String, text: String) {
     val dir = File(ctx.cacheDir, "reports").apply { mkdirs() }

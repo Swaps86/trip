@@ -788,6 +788,8 @@ fun BackupScreen(vm: TripVM) {
                 onClick = { shareBackupFile(ctx, savedName ?: backupFileName(), vm.backupText()) }) {
                 Text("Share backup (WhatsApp, Drive…)")
             }
+            OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
+                onClick = { openDownloads(ctx) }) { Text("Open Downloads folder") }
             Text("The file holds all trips, expenses and categories. Keep a copy somewhere safe.", color = Muted, fontSize = 13.sp)
             Text("RESTORE", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
