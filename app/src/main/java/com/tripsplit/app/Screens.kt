@@ -31,6 +31,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.widget.Toast
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -220,6 +223,13 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
     val groups = trip.expenses.groupBy { it.paidBy }.toList().sortedByDescending { g -> g.second.sumOf { it.amount } }
     val byCat = trip.expenses.groupBy { it.category }.mapValues { e -> e.value.sumOf { it.amount } }
         .toList().sortedByDescending { it.second }
+    var newTolls by remember { mutableStateOf<List<TollSms>>(emptyList()) }
+    LaunchedEffect(trip.id, trip.expenses.size) {
+        if (hasSmsPermission(ctx)) {
+            val r = withContext(Dispatchers.IO) { scanTollSms(ctx, trip) }
+            newTolls = r.inTrip.filter { t -> trip.expenses.none { it.ref == t.ref } }
+        }
+    }
     if (confirm) AlertDialog(onDismissRequest = { confirm = false },
         title = { Text("Delete “${trip.name}”?") }, text = { Text("All its expenses will be removed.") },
         confirmButton = { TextButton(onClick = { vm.deleteTrip(trip.id) }) { Text("Delete") } },
@@ -252,6 +262,7 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More options") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("Import tolls and UPI from SMS") }, onClick = { menu = false; vm.screen = Screen.Toll(trip.id) })
                             DropdownMenuItem(text = { Text("Delete trip") }, onClick = { menu = false; confirm = true })
                         }
                     }
@@ -287,6 +298,18 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                 }
             }
             if (tab == 0) {
+                if (newTolls.isNotEmpty()) item {
+                    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF4F1))) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("${newTolls.size} toll / UPI payment message${if (newTolls.size > 1) "s" else ""} found",
+                                fontWeight = FontWeight.Bold, color = Color(0xFF0B4F44))
+                            Text("Dated within this trip · total ${inr(newTolls.sumOf { it.amount })}", color = Muted, fontSize = 13.sp)
+                            Button(modifier = Modifier.fillMaxWidth(), onClick = { vm.screen = Screen.Toll(trip.id) }) {
+                                Text("Review and add")
+                            }
+                        }
+                    }
+                }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("View:", color = Muted, fontSize = 13.sp)
@@ -310,7 +333,7 @@ fun DetailScreen(trip: Trip, vm: TripVM) {
                     WhiteCard(Modifier.clickable { vm.screen = Screen.ExpenseView(trip.id, e.id) }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(e.category, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                                Text(e.category + refTag(e.ref), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                                 Text("${e.paidBy} paid · ${fmtDate(e.date)}", color = Muted, fontSize = 13.sp)
                                 if (e.location.isNotBlank()) Text(e.location, color = Muted, fontSize = 13.sp)
                                 if (e.note.isNotBlank()) Text(e.note, color = Muted, fontSize = 13.sp)
@@ -445,7 +468,7 @@ fun ExpenseScreen(trip: Trip, e: Expense, vm: TripVM) {
             Header("Expense", trip.name, onBack = { vm.screen = Screen.Detail(trip.id) })
             WhiteCard {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(e.category, color = Green, fontWeight = FontWeight.SemiBold)
+                    Text(e.category + refTag(e.ref), color = Green, fontWeight = FontWeight.SemiBold)
                     Text(inr(e.amount), fontSize = 40.sp, fontWeight = FontWeight.Bold)
                     Text(fmtDate(e.date), color = Muted)
                 }
@@ -554,6 +577,122 @@ fun ExpenseForm(trip: Trip, existing: Expense?, vm: TripVM) {
             if (existing != null) OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
                 onClick = { back() }) { Text("Cancel") }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+// ---------- 6. Toll and UPI payments from SMS ----------
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TollScreen(trip: Trip, vm: TripVM) {
+    val ctx = LocalContext.current
+    var granted by remember { mutableStateOf(hasSmsPermission(ctx)) }
+    var paste by remember { mutableStateOf(false) }
+    var skipped by remember { mutableStateOf(false) }
+    var pasted by remember { mutableStateOf("") }
+    var extra by remember { mutableStateOf(listOf<TollSms>()) }
+    var scan by remember { mutableStateOf(ScanResult(emptyList(), 0)) }
+    var scanned by remember { mutableStateOf(false) }
+    var paid by remember { mutableStateOf(trip.travelers.first()) }
+    var picked by remember { mutableStateOf(setOf<String>()) }
+    var cats by remember { mutableStateOf(mapOf<String, String>()) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    LaunchedEffect(granted) {
+        if (granted) {
+            scan = withContext(Dispatchers.IO) { scanTollSms(ctx, trip) }
+            scanned = true
+            picked = picked + scan.inTrip.filter { t -> t.confident && trip.expenses.none { it.ref == t.ref } }.map { it.ref }
+        }
+    }
+    val all = (scan.inTrip + extra).distinctBy { it.ref }
+    fun isNew(t: TollSms) = trip.expenses.none { it.ref == t.ref }
+    fun catOf(t: TollSms) = cats[t.ref] ?: t.category
+    val chosen = all.filter { it.ref in picked && isNew(it) }
+
+    Scaffold(containerColor = Bg) { p ->
+        Column(Modifier.padding(p).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Header("Toll and UPI from SMS", trip.name, onBack = { vm.screen = Screen.Detail(trip.id) })
+            if (!granted && !skipped && extra.isEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Text("Read payment messages?", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                WhiteCard {
+                    Text("1. Only FASTag toll messages and UPI “Sent Rs…” payment messages are checked.")
+                    Text("2. Only messages dated within this trip, ${fmtDate(trip.start)} – ${fmtDate(trip.end)}.")
+                    Text("3. Everything stays on your phone. Nothing is uploaded.")
+                    Text("4. You choose which payments to add and their category.")
+                }
+                Button(modifier = Modifier.fillMaxWidth().height(52.dp),
+                    onClick = { launcher.launch(Manifest.permission.READ_SMS) }) { Text("Allow and continue") }
+                OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
+                    onClick = { skipped = true; paste = true }) { Text("Not now, paste a message instead") }
+            } else {
+                if (granted && scanned) WhiteCard {
+                    Text("${scan.inTrip.size + scan.ignored} payment messages found", fontWeight = FontWeight.Bold)
+                    Text("${scan.inTrip.size} inside trip dates (${fmtDate(trip.start)} – ${fmtDate(trip.end)}) · ${scan.ignored} ignored",
+                        color = Muted, fontSize = 13.sp)
+                }
+                if (!granted) OutlinedButton(modifier = Modifier.fillMaxWidth(),
+                    onClick = { launcher.launch(Manifest.permission.READ_SMS) }) { Text("Allow SMS access to find payments automatically") }
+                if (granted && scanned && all.isEmpty()) Text("No toll or UPI payment messages found within the trip dates.", color = Muted)
+                all.forEach { t ->
+                    key(t.ref) {
+                        val fresh = isNew(t)
+                        var open by remember { mutableStateOf(false) }
+                        WhiteCard {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = t.ref in picked && fresh, enabled = fresh,
+                                    onCheckedChange = { on -> picked = if (on) picked + t.ref else picked - t.ref })
+                                Column(Modifier.weight(1f)) {
+                                    Text(t.plaza, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text(listOf(fmtDate(t.dateUtc), t.time).filter { it.isNotBlank() }.joinToString(" · "),
+                                        color = Muted, fontSize = 13.sp)
+                                    val sub = if (t.kind == "upi") t.detail else listOfNotNull(
+                                        if (t.vrn.isNotBlank()) "VRN ${t.vrn}" else null,
+                                        t.balance?.let { "FASTag balance ${inr(it)}" }).joinToString(" · ")
+                                    if (sub.isNotBlank()) Text(sub, color = Muted, fontSize = 13.sp)
+                                    if (!fresh) Text("Already added", color = Green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Text(inr(t.amount), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            }
+                            if (fresh && t.kind == "upi") Box {
+                                AssistChip(onClick = { open = true },
+                                    label = { Text("Category: ${catOf(t)}${if (!t.confident && t.ref !in cats) " (check)" else ""}") })
+                                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                    vm.allCats.forEach { c ->
+                                        DropdownMenuItem(text = { Text(c) }, onClick = { cats = cats + (t.ref to c); open = false })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (chosen.isNotEmpty()) Text("Selected ${chosen.size} · Total ${inr(chosen.sumOf { it.amount })}", fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { paste = !paste }) { Text("Paste a message manually") }
+                if (paste) {
+                    OutlinedTextField(pasted, { pasted = it }, label = { Text("Paste toll or UPI SMS here") },
+                        modifier = Modifier.fillMaxWidth(), minLines = 3)
+                    OutlinedButton(enabled = pasted.isNotBlank(), onClick = {
+                        val r = parseTolls(pasted) + parseUpi(pasted)
+                        if (r.isEmpty()) Toast.makeText(ctx, "No toll or UPI message found in this text", Toast.LENGTH_LONG).show()
+                        else { extra = extra + r; picked = picked + r.filter { it.confident }.map { it.ref }; pasted = ""; paste = false }
+                    }) { Text("Read message") }
+                }
+                Text("Who paid?", color = Muted, fontSize = 13.sp)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    trip.travelers.forEach { n -> FilterChip(selected = paid == n, onClick = { paid = n }, label = { Text(n) }) }
+                }
+                Button(enabled = chosen.isNotEmpty(), modifier = Modifier.fillMaxWidth().height(52.dp), onClick = {
+                    chosen.forEach { t ->
+                        vm.saveExpense(trip.id, Expense(category = catOf(t), amount = t.amount, date = t.dateUtc,
+                            note = tollNote(t), paidBy = paid, splitAmong = trip.travelers,
+                            location = if (t.kind == "upi") t.plaza else "${t.plaza} toll plaza", ref = t.ref))
+                    }
+                    Toast.makeText(ctx, "${chosen.size} expense${if (chosen.size > 1) "s" else ""} added", Toast.LENGTH_SHORT).show()
+                    vm.screen = Screen.Detail(trip.id)
+                }) { Text("Add ${chosen.size} expense${if (chosen.size == 1) "" else "s"}") }
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }

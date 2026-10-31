@@ -13,6 +13,7 @@ sealed class Screen {
     data class Detail(val id: String) : Screen()
     data class ExpenseView(val id: String, val eid: String) : Screen()
     data class Form(val id: String, val eid: String?) : Screen()
+    data class Toll(val id: String) : Screen()
 }
 
 class TripVM(app: Application) : AndroidViewModel(app) {

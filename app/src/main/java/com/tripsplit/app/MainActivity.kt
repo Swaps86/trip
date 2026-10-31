@@ -29,6 +29,7 @@ fun App(vm: TripVM = viewModel()) {
         vm.screen = when (s) {
             is Screen.Form -> if (s.eid != null) Screen.ExpenseView(s.id, s.eid) else Screen.Detail(s.id)
             is Screen.ExpenseView -> Screen.Detail(s.id)
+            is Screen.Toll -> Screen.Detail(s.id)
             else -> Screen.Home
         }
     }
@@ -41,6 +42,7 @@ fun App(vm: TripVM = viewModel()) {
             val e = t?.expenses?.find { it.id == s.eid }
             if (t != null && e != null) ExpenseScreen(t, e, vm) else HomeScreen(vm)
         }
+        is Screen.Toll -> vm.trips.find { it.id == s.id }?.let { TollScreen(it, vm) } ?: HomeScreen(vm)
         is Screen.Form -> {
             val t = vm.trips.find { it.id == s.id }
             if (t != null) ExpenseForm(t, t.expenses.find { it.id == s.eid }, vm) else HomeScreen(vm)
