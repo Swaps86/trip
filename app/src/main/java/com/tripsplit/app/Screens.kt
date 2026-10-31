@@ -101,6 +101,7 @@ fun Footer() = Column(Modifier.fillMaxWidth().background(Bg).padding(vertical = 
 @Composable
 fun HomeScreen(vm: TripVM) {
     var about by remember { mutableStateOf(false) }
+    var homeMenu by remember { mutableStateOf(false) }
     if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("About TripSplit") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -120,9 +121,27 @@ fun HomeScreen(vm: TripVM) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("My trips", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { about = true }) { Icon(Icons.Default.Info, "About this app") }
+                Box {
+                    IconButton(onClick = { homeMenu = true }) { Icon(Icons.Default.MoreVert, "Menu") }
+                    DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
+                        DropdownMenuItem(text = { Text("Backup and restore") }, onClick = { homeMenu = false; vm.screen = Screen.Backup })
+                        DropdownMenuItem(text = { Text("About") }, onClick = { homeMenu = false; about = true })
+                    }
+                }
             }
             Spacer(Modifier.height(10.dp))
+            val due = vm.remind && vm.trips.isNotEmpty() &&
+                (vm.lastBackup == 0L || System.currentTimeMillis() - vm.lastBackup > 7 * 86_400_000L)
+            if (due) {
+                WhiteCard(Modifier.clickable { vm.screen = Screen.Backup }) {
+                    Text("Back up your trips", fontWeight = FontWeight.Bold)
+                    Text(if (vm.lastBackup == 0L) "You have not made a backup yet."
+                         else "Last backup was ${(System.currentTimeMillis() - vm.lastBackup) / 86_400_000L} days ago.",
+                        color = Muted, fontSize = 13.sp)
+                    Text("Tap to back up now", color = Green, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(10.dp))
+            }
             if (vm.trips.isEmpty()) Text("No trips yet. Tap “New trip” to start.", color = Muted)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(vm.trips, key = { it.id }) { t ->
@@ -693,6 +712,97 @@ fun TollScreen(trip: Trip, vm: TripVM) {
                 }) { Text("Add ${chosen.size} expense${if (chosen.size == 1) "" else "s"}") }
                 Spacer(Modifier.height(16.dp))
             }
+        }
+    }
+}
+
+// ---------- 7. Backup and restore ----------
+@Composable
+fun BackupScreen(vm: TripVM) {
+    val ctx = LocalContext.current
+    var savedName by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf<Backup?>(null) }
+    var replace by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val b = readTextFromUri(ctx, uri)?.let { parseBackup(it) }
+            if (b == null) Toast.makeText(ctx, "This is not a TripSplit backup file", Toast.LENGTH_LONG).show()
+            else { pending = b; replace = false }
+        }
+    }
+    val expenseCount = vm.trips.sumOf { it.expenses.size }
+    pending?.let { b ->
+        AlertDialog(onDismissRequest = { pending = null }, title = { Text("Restore this backup?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${b.trips.size} trips · ${b.trips.sumOf { it.expenses.size }} expenses" +
+                        if (b.saved > 0) " · saved ${fmtDate(b.saved)}" else "", fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth().clickable { replace = false }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = !replace, onClick = { replace = false })
+                        Column { Text("Merge with current data", fontWeight = FontWeight.SemiBold)
+                            Text("Adds missing trips and expenses. Nothing is deleted.", color = Muted, fontSize = 13.sp) }
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { replace = true }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = replace, onClick = { replace = true })
+                        Column { Text("Replace everything", fontWeight = FontWeight.SemiBold)
+                            Text("Deletes current data and uses the backup only.", color = Muted, fontSize = 13.sp) }
+                    }
+                    Text("A safety copy of your current data is saved to Downloads first.", color = Muted, fontSize = 13.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (vm.trips.isNotEmpty()) saveTextToDownloads(ctx, backupFileName("TripSplit_SafetyCopy"), vm.backupText())
+                    vm.restore(b, replace)
+                    Toast.makeText(ctx, "Backup restored", Toast.LENGTH_SHORT).show()
+                    pending = null
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } })
+    }
+    Scaffold(containerColor = Bg) { p ->
+        Column(Modifier.padding(p).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Header("Backup and restore", onBack = { vm.screen = Screen.Home })
+            WhiteCard {
+                Text("Your data on this phone", fontWeight = FontWeight.Bold)
+                Text("${vm.trips.size} trips · $expenseCount expenses · ${vm.customCats.size} own categories", color = Muted, fontSize = 13.sp)
+                Text("Last backup: " + if (vm.lastBackup == 0L) "Never"
+                    else SimpleDateFormat("d MMM yyyy, h:mm a", Locale.ENGLISH).format(Date(vm.lastBackup)),
+                    color = Muted, fontSize = 13.sp)
+            }
+            Button(modifier = Modifier.fillMaxWidth().height(52.dp), onClick = {
+                val name = backupFileName()
+                if (saveTextToDownloads(ctx, name, vm.backupText())) { vm.markBackup(); savedName = name }
+                else Toast.makeText(ctx, "Could not save the backup", Toast.LENGTH_LONG).show()
+            }) { Text("Back up now") }
+            savedName?.let { n ->
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF4F1))) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Backup saved", fontWeight = FontWeight.Bold, color = Color(0xFF0B4F44))
+                        Text("Downloads / $n", color = Muted, fontSize = 13.sp)
+                    }
+                }
+            }
+            OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
+                onClick = { shareBackupFile(ctx, savedName ?: backupFileName(), vm.backupText()) }) {
+                Text("Share backup (WhatsApp, Drive…)")
+            }
+            Text("The file holds all trips, expenses and categories. Keep a copy somewhere safe.", color = Muted, fontSize = 13.sp)
+            Text("RESTORE", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            OutlinedButton(modifier = Modifier.fillMaxWidth().height(52.dp),
+                onClick = { picker.launch(arrayOf("*/*")) }) { Text("Restore from backup file") }
+            Text("Use this on a new phone or after reinstalling the app.", color = Muted, fontSize = 13.sp)
+            WhiteCard {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Backup reminder", fontWeight = FontWeight.Bold)
+                        Text("Shows a note on the home screen when the last backup is over 7 days old.", color = Muted, fontSize = 13.sp)
+                    }
+                    Switch(checked = vm.remind, onCheckedChange = { vm.setRemind(it) })
+                }
+            }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

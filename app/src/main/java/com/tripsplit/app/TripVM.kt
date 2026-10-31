@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import org.json.JSONArray
+import org.json.JSONObject
 
 sealed class Screen {
     object Home : Screen()
@@ -14,6 +15,7 @@ sealed class Screen {
     data class ExpenseView(val id: String, val eid: String) : Screen()
     data class Form(val id: String, val eid: String?) : Screen()
     data class Toll(val id: String) : Screen()
+    object Backup : Screen()
 }
 
 class TripVM(app: Application) : AndroidViewModel(app) {
@@ -23,6 +25,36 @@ class TripVM(app: Application) : AndroidViewModel(app) {
     var customCats by mutableStateOf(loadCats()); private set
 
     val allCats: List<String> get() = CATEGORIES + customCats
+
+    var lastBackup by mutableStateOf(prefs.getLong("last_backup", 0L)); private set
+    var remind by mutableStateOf(prefs.getBoolean("remind", true)); private set
+
+    fun backupText(): String = JSONObject().put("app", "TripSplit").put("format", 1)
+        .put("saved", System.currentTimeMillis())
+        .put("trips", JSONArray(trips.map { it.toJson() })).put("cats", JSONArray(customCats)).toString()
+
+    fun markBackup() { lastBackup = System.currentTimeMillis(); prefs.edit().putLong("last_backup", lastBackup).apply() }
+    fun setRemind(on: Boolean) { remind = on; prefs.edit().putBoolean("remind", on).apply() }
+
+    private fun setCats(l: List<String>) {
+        customCats = l; prefs.edit().putString("cats", JSONArray(l).toString()).apply()
+    }
+
+    /** replace = true: use only the backup. false: merge, keeping everything already on the phone. */
+    fun restore(b: Backup, replace: Boolean) {
+        if (replace) { save(b.trips); setCats(b.cats); return }
+        val merged = trips.toMutableList()
+        for (bt in b.trips) {
+            val i = merged.indexOfFirst { it.id == bt.id }
+            if (i < 0) merged.add(bt) else {
+                val cur = merged[i]
+                val ids = cur.expenses.map { it.id }.toSet()
+                merged[i] = cur.copy(travelers = (cur.travelers + bt.travelers).distinct(),
+                    expenses = cur.expenses + bt.expenses.filter { it.id !in ids })
+            }
+        }
+        save(merged); setCats((customCats + b.cats).distinct())
+    }
 
     private fun load(): List<Trip> = try {
         val a = JSONArray(prefs.getString("data", "[]"))

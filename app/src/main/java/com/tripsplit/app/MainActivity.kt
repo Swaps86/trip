@@ -36,6 +36,7 @@ fun App(vm: TripVM = viewModel()) {
     when (s) {
         Screen.Home -> HomeScreen(vm)
         Screen.Create -> CreateScreen(vm)
+        Screen.Backup -> BackupScreen(vm)
         is Screen.Detail -> vm.trips.find { it.id == s.id }?.let { DetailScreen(it, vm) } ?: HomeScreen(vm)
         is Screen.ExpenseView -> {
             val t = vm.trips.find { it.id == s.id }
