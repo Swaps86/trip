@@ -799,7 +799,7 @@ fun BackupScreen(vm: TripVM) {
                         Text("Backup reminder", fontWeight = FontWeight.Bold)
                         Text("Shows a note on the home screen when the last backup is over 7 days old.", color = Muted, fontSize = 13.sp)
                     }
-                    Switch(checked = vm.remind, onCheckedChange = { vm.setRemind(it) })
+                    Switch(checked = vm.remind, onCheckedChange = { vm.updateRemind(it) })
                 }
             }
             Spacer(Modifier.height(16.dp))

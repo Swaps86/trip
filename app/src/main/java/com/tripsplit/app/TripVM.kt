@@ -34,7 +34,7 @@ class TripVM(app: Application) : AndroidViewModel(app) {
         .put("trips", JSONArray(trips.map { it.toJson() })).put("cats", JSONArray(customCats)).toString()
 
     fun markBackup() { lastBackup = System.currentTimeMillis(); prefs.edit().putLong("last_backup", lastBackup).apply() }
-    fun setRemind(on: Boolean) { remind = on; prefs.edit().putBoolean("remind", on).apply() }
+    fun updateRemind(on: Boolean) { remind = on; prefs.edit().putBoolean("remind", on).apply() }
 
     private fun setCats(l: List<String>) {
         customCats = l; prefs.edit().putString("cats", JSONArray(l).toString()).apply()
